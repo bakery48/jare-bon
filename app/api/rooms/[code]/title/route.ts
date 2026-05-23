@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { startGame } from "@/lib/store";
+import { setTitle } from "@/lib/store";
 
 export async function POST(
   req: NextRequest,
@@ -10,9 +10,9 @@ export async function POST(
   if (!hostId || !title?.trim()) {
     return NextResponse.json({ error: "hostId and title required" }, { status: 400 });
   }
-  const room = startGame(code, hostId, title);
+  const room = setTitle(code, hostId, title);
   if (!room) {
-    return NextResponse.json({ error: "Cannot start game" }, { status: 400 });
+    return NextResponse.json({ error: "Cannot set title" }, { status: 400 });
   }
   return NextResponse.json({ ok: true });
 }

@@ -10,17 +10,16 @@ export interface Page {
   pageNumber: number;
 }
 
-export interface WordSubmission {
+export interface TitleProposal {
   playerId: string;
   playerName: string;
-  words: string[];
+  title: string;
 }
 
 export type RoomStatus =
   | "waiting"
-  | "naming"       // ① 名前を10個集める
-  | "associating"  // ② 選ばれた名前から連想5つ
-  | "titling"      // ③ ホストが組み合わせて題名を決める
+  | "worksheeting"  // 各自①②③を独立して行い題名案を提出
+  | "selecting"     // ホストが題名案を1つ選ぶ
   | "writing"
   | "reading";
 
@@ -35,10 +34,7 @@ export interface Room {
   currentPageIndex: number;
   pageStartTime: number | null;
   timerDuration: number;
-  // Title creation
-  nameSubmissions: WordSubmission[];   // ① 全員の名前リスト
-  selectedNameWord: string | null;     // ホストが選んだ名前
-  assocSubmissions: WordSubmission[];  // ② 全員の連想リスト
+  titleProposals: TitleProposal[];
 }
 
 export interface ClientRoom {
@@ -53,12 +49,8 @@ export interface ClientRoom {
   timerDuration: number;
   visiblePage: string | null;
   pages: Page[];
-  // Title creation (visible to all)
-  nameSubmissions: WordSubmission[];
-  selectedNameWord: string | null;
-  assocSubmissions: WordSubmission[];
-  hasSubmittedNames: boolean;
-  hasSubmittedAssoc: boolean;
+  titleProposals: TitleProposal[];
+  hasSubmittedTitle: boolean;
 }
 
 const rooms = new Map<string, Room>();
@@ -89,9 +81,7 @@ export function createRoom(hostId: string): Room {
     currentPageIndex: 0,
     pageStartTime: null,
     timerDuration: 120,
-    nameSubmissions: [],
-    selectedNameWord: null,
-    assocSubmissions: [],
+    titleProposals: [],
   };
   rooms.set(code, room);
   return room;
@@ -116,77 +106,45 @@ export function joinRoom(
   return room;
 }
 
-// ホストが題名ワークシートフェーズを開始
-export function startNaming(code: string, hostId: string): Room | null {
+// ホストがワークシートフェーズを開始
+export function startWorksheet(code: string, hostId: string): Room | null {
   const room = rooms.get(code.toUpperCase());
   if (!room) return null;
   if (room.hostId !== hostId) return null;
   if (room.status !== "waiting") return null;
   if (room.players.length < 3) return null;
-  room.status = "naming";
-  room.nameSubmissions = [];
+  room.status = "worksheeting";
+  room.titleProposals = [];
   notifyRoom(code);
   return room;
 }
 
-// 各プレイヤーが名前を10個提出
-export function submitNames(
+// 各プレイヤーが①②③を終えて題名案を提出
+export function proposeTitleByPlayer(
   code: string,
   playerId: string,
-  words: string[]
+  title: string
 ): Room | null {
   const room = rooms.get(code.toUpperCase());
   if (!room) return null;
-  if (room.status !== "naming") return null;
+  if (room.status !== "worksheeting") return null;
   const player = room.players.find((p) => p.id === playerId);
   if (!player) return null;
   // 既提出なら上書き
-  const existing = room.nameSubmissions.findIndex((s) => s.playerId === playerId);
-  const submission: WordSubmission = { playerId, playerName: player.name, words };
-  if (existing >= 0) room.nameSubmissions[existing] = submission;
-  else room.nameSubmissions.push(submission);
+  const existing = room.titleProposals.findIndex((p) => p.playerId === playerId);
+  const proposal: TitleProposal = { playerId, playerName: player.name, title: title.trim() };
+  if (existing >= 0) room.titleProposals[existing] = proposal;
+  else room.titleProposals.push(proposal);
+  // 全員提出したら選択フェーズへ
+  if (room.titleProposals.length >= room.players.length) {
+    room.status = "selecting";
+  }
   notifyRoom(code);
   return room;
 }
 
-// ホストが1つの名前を選んで連想フェーズへ
-export function selectNameWord(
-  code: string,
-  hostId: string,
-  word: string
-): Room | null {
-  const room = rooms.get(code.toUpperCase());
-  if (!room) return null;
-  if (room.hostId !== hostId) return null;
-  if (room.status !== "naming") return null;
-  room.selectedNameWord = word;
-  room.status = "associating";
-  room.assocSubmissions = [];
-  notifyRoom(code);
-  return room;
-}
-
-// 各プレイヤーが連想を5つ提出
-export function submitAssociations(
-  code: string,
-  playerId: string,
-  words: string[]
-): Room | null {
-  const room = rooms.get(code.toUpperCase());
-  if (!room) return null;
-  if (room.status !== "associating") return null;
-  const player = room.players.find((p) => p.id === playerId);
-  if (!player) return null;
-  const existing = room.assocSubmissions.findIndex((s) => s.playerId === playerId);
-  const submission: WordSubmission = { playerId, playerName: player.name, words };
-  if (existing >= 0) room.assocSubmissions[existing] = submission;
-  else room.assocSubmissions.push(submission);
-  notifyRoom(code);
-  return room;
-}
-
-// ホストが組み合わせて題名を確定 → writingフェーズへ
-export function setTitle(
+// ホストが題名案を1つ選んでゲーム開始
+export function selectTitle(
   code: string,
   hostId: string,
   title: string
@@ -194,7 +152,7 @@ export function setTitle(
   const room = rooms.get(code.toUpperCase());
   if (!room) return null;
   if (room.hostId !== hostId) return null;
-  if (room.status !== "associating" && room.status !== "titling") return null;
+  if (room.status !== "selecting") return null;
   if (!title.trim()) return null;
   room.title = title.trim();
   room.status = "writing";
@@ -267,11 +225,8 @@ export function toClientRoom(room: Room, playerId: string): ClientRoom {
     timerDuration: room.timerDuration,
     visiblePage,
     pages: room.status === "reading" ? room.pages : [],
-    nameSubmissions: room.nameSubmissions,
-    selectedNameWord: room.selectedNameWord,
-    assocSubmissions: room.assocSubmissions,
-    hasSubmittedNames: room.nameSubmissions.some((s) => s.playerId === playerId),
-    hasSubmittedAssoc: room.assocSubmissions.some((s) => s.playerId === playerId),
+    titleProposals: room.titleProposals,
+    hasSubmittedTitle: room.titleProposals.some((p) => p.playerId === playerId),
   };
 }
 

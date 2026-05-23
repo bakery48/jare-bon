@@ -288,22 +288,145 @@ function WritingPhase({
 
 // ---- Reading Phase ----
 function ReadingPhase({ room }: { room: ClientRoom }) {
+  // -1 = title, 0..n-1 = pages, null = idle/done
+  const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const cancelRef = useRef(false);
+
+  // Build ordered script: [title, page0, page1, ...]
+  const script = [
+    { label: "題名", text: `題名。${room.title}` },
+    ...room.pages.map((p, i) => ({
+      label: `${i + 1}ページ目`,
+      text: `${i + 1}ページ目。${p.playerName}さん。${p.content}`,
+    })),
+  ];
+
+  const speakSegment = useCallback(
+    (index: number) => {
+      if (cancelRef.current || index >= script.length) {
+        setSpeakingIndex(null);
+        return;
+      }
+      const utterance = new SpeechSynthesisUtterance(script[index].text);
+      utterance.lang = "ja-JP";
+      utterance.rate = 0.9;
+      setSpeakingIndex(index === 0 ? -1 : index - 1);
+
+      // Scroll the page card into view
+      if (index > 0) {
+        pageRefs.current[index - 1]?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }
+
+      utterance.onend = () => {
+        if (!cancelRef.current) speakSegment(index + 1);
+      };
+      window.speechSynthesis.speak(utterance);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [script.length]
+  );
+
+  function startReading() {
+    cancelRef.current = false;
+    window.speechSynthesis.cancel();
+    setIsPaused(false);
+    speakSegment(0);
+  }
+
+  function togglePause() {
+    if (isPaused) {
+      window.speechSynthesis.resume();
+      setIsPaused(false);
+    } else {
+      window.speechSynthesis.pause();
+      setIsPaused(true);
+    }
+  }
+
+  function stopReading() {
+    cancelRef.current = true;
+    window.speechSynthesis.cancel();
+    setSpeakingIndex(null);
+    setIsPaused(false);
+  }
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cancelRef.current = true;
+      window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  const isReading = speakingIndex !== null;
+
   return (
     <div className="min-h-screen bg-amber-50 p-4">
       <div className="w-full max-w-lg mx-auto">
-        <div className="text-center mb-6">
+        <div className="text-center mb-4">
           <h2 className="text-2xl font-bold text-amber-900 mb-1">完成！</h2>
-          <p className="text-amber-700">みんなで読みましょう</p>
+          <p className="text-amber-700 mb-3">みんなで読みましょう</p>
+
+          {/* TTS controls */}
+          <div className="flex justify-center gap-2">
+            {!isReading ? (
+              <button
+                onClick={startReading}
+                className="bg-amber-800 text-white px-5 py-2 rounded-xl font-semibold hover:bg-amber-700 transition-colors flex items-center gap-2"
+              >
+                <span>▶</span> 読み上げ開始
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={togglePause}
+                  className="bg-amber-600 text-white px-5 py-2 rounded-xl font-semibold hover:bg-amber-500 transition-colors"
+                >
+                  {isPaused ? "▶ 再開" : "⏸ 一時停止"}
+                </button>
+                <button
+                  onClick={stopReading}
+                  className="border-2 border-amber-600 text-amber-700 px-4 py-2 rounded-xl font-semibold hover:bg-amber-100 transition-colors"
+                >
+                  ■ 停止
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
-        <div className="bg-amber-100 border border-amber-300 rounded-2xl p-5 mb-4 text-center">
+        {/* Title card */}
+        <div
+          className={`border-2 rounded-2xl p-5 mb-4 text-center transition-colors ${
+            speakingIndex === -1
+              ? "bg-amber-300 border-amber-500"
+              : "bg-amber-100 border-amber-300"
+          }`}
+        >
           <p className="text-xs text-amber-600 mb-1 font-medium">題名</p>
           <p className="text-2xl font-bold text-amber-900">{room.title}</p>
+          {speakingIndex === -1 && (
+            <p className="text-xs text-amber-600 mt-1 animate-pulse">読み上げ中...</p>
+          )}
         </div>
 
+        {/* Page cards */}
         <div className="space-y-4">
           {room.pages.map((page, i) => (
-            <div key={i} className="bg-white rounded-2xl p-5 shadow-sm">
+            <div
+              key={i}
+              ref={(el) => { pageRefs.current[i] = el; }}
+              className={`rounded-2xl p-5 shadow-sm border-2 transition-colors ${
+                speakingIndex === i
+                  ? "bg-amber-50 border-amber-400"
+                  : "bg-white border-transparent"
+              }`}
+            >
               <div className="flex justify-between items-center mb-3">
                 <span className="text-xs font-medium text-amber-600">
                   {i + 1}ページ目
@@ -313,14 +436,20 @@ function ReadingPhase({ room }: { room: ClientRoom }) {
               <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">
                 {page.content}
               </p>
+              {speakingIndex === i && (
+                <p className="text-xs text-amber-500 mt-2 animate-pulse">読み上げ中...</p>
+              )}
             </div>
           ))}
         </div>
 
         <div className="mt-6 text-center">
           <button
-            onClick={() => (window.location.href = "/")}
-            className="bg-amber-800 text-white px-8 py-3 rounded-xl font-semibold hover:bg-amber-700 transition-colors"
+            onClick={() => {
+              stopReading();
+              window.location.href = "/";
+            }}
+            className="border-2 border-amber-800 text-amber-800 px-8 py-3 rounded-xl font-semibold hover:bg-amber-100 transition-colors"
           >
             トップに戻る
           </button>

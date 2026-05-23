@@ -86,7 +86,7 @@ function WaitingRoom({
             ))}
           </ul>
           <p className="text-xs text-gray-400 text-center">
-            {room.players.length}/8人参加中 ／ 開始には3人以上必要
+            {room.players.length}/8人参加中 ／ 開始には2人以上必要
           </p>
         </div>
 
@@ -99,7 +99,7 @@ function WaitingRoom({
             {error && <p className="text-red-500 text-sm mb-2">{error}</p>}
             <button
               onClick={handleStart}
-              disabled={loading || room.players.length < 3}
+              disabled={loading || room.players.length < 2}
               className="w-full bg-amber-800 text-white py-3 rounded-xl font-semibold hover:bg-amber-700 disabled:opacity-50 transition-colors"
             >
               {loading ? "..." : "題名ワークシートへ →"}

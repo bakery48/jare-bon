@@ -112,7 +112,7 @@ export function startWorksheet(code: string, hostId: string): Room | null {
   if (!room) return null;
   if (room.hostId !== hostId) return null;
   if (room.status !== "waiting") return null;
-  if (room.players.length < 3) return null;
+  if (room.players.length < 2) return null;
   room.status = "worksheeting";
   room.titleProposals = [];
   notifyRoom(code);
